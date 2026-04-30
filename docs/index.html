@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Dynasty Advisor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body, #root { height: 100%; width: 100%; overflow: hidden; }
+  body { background: #06070a; font-family: 'Outfit', sans-serif; color: #e6e6e8; }
+  input::placeholder { color: #4e5058; }
+  input:focus { border-color: rgba(52,211,153,0.25) !important; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 4px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<script type="text/babel">
+const { useState, useMemo, useCallback, useRef, useEffect } = React;
+
+/* ═══════════════════════════════════════════════════════════
+   DYNASTY FANTASY FOOTBALL ADVISOR — Standalone v3
+   Sleeper API + Claude API (user-provided key)
+   Deploy to GitHub Pages or open locally
+   ═══════════════════════════════════════════════════════════ */
+
+const C = {
+  bg: "#06070a", surface: "#0d0f14", card: "#12141a", cardHover: "#181b22",
+  border: "rgba(255,255,255,0.05)", borderLight: "rgba(255,255,255,0.1)",
+  text: "#e6e6e8", textSec: "#85878f", textMute: "#4e5058",
+  accent: "#34d399", accentDim: "rgba(52,211,153,0.1)", accentBorder: "rgba(52,211,153,0.25)",
+  red: "#f87171", redDim: "rgba(248,113,113,0.1)",
+  green: "#4ade80", greenDim: "rgba(74,222,128,0.1)",
+  blue: "#60a5fa", blueDim: "rgba(96,165,250,0.1)",
+  amber: "#fbbf24", amberDim: "rgba(251,191,36,0.1)",
+  purple: "#a78bfa", purpleDim: "rgba(167,139,250,0.1)",
+};
+
+const SYSTEM_PROMPT = `You are an expert dynasty fantasy football advisor. You combine deep NFL player valuation knowledge, roster construction strategy, and long-term dynasty team building expert[...]`;
+
+</script>
+</body>
+</html>
