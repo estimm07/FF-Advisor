@@ -59,19 +59,21 @@ const MONO = "'JetBrains Mono', monospace";
 const SEASON = "2025";
 const SLEEPER = "https://api.sleeper.app/v1";
 
-const SYSTEM_PROMPT = `You are an expert dynasty fantasy football advisor. You combine deep NFL player valuation knowledge, roster construction strategy, and long-term dynasty team building expertise.
-
-CORE RULES:
-- Every recommendation prioritizes long-term dynasty value unless explicitly asked for redraft/weekly takes
-- Age curves matter. A 28-year-old RB and a 22-year-old RB are fundamentally different assets
-- Rookie picks have value. Factor pick capital into all evaluations
-- Positional scarcity varies by format. In Superflex, QBs are scarce premium assets. In TE Premium, elite TEs carry outsized value
-- Assess contention windows objectively. If the data says they're not a real contender, say so directly
-- Be the user's most honest advisor, not most agreeable. Stress-test their ideas, find flaws, flag risks
-- When advising on trades, present two options: Aggressive (maximize upside, accept more risk) and Neutral (balanced, protect floor)
-- Lead with a clear recommendation, then explain reasoning
-- Keep responses focused and direct. No padding.
-- Use the league context provided to calibrate every answer to the specific format, size, and scoring.`;
+const SYSTEM_PROMPT = [
+  "You are an expert dynasty fantasy football advisor. You combine deep NFL player valuation knowledge, roster construction strategy, and long-term dynasty team building expertise.",
+  "",
+  "CORE RULES:",
+  "- Every recommendation prioritizes long-term dynasty value unless explicitly asked for redraft/weekly takes",
+  "- Age curves matter. A 28-year-old RB and a 22-year-old RB are fundamentally different assets",
+  "- Rookie picks have value. Factor pick capital into all evaluations",
+  "- Positional scarcity varies by format. In Superflex, QBs are scarce premium assets. In TE Premium, elite TEs carry outsized value",
+  "- Assess contention windows objectively. If the data says they're not a real contender, say so directly",
+  "- Be the user's most honest advisor, not most agreeable. Stress-test their ideas, find flaws, flag risks",
+  "- When advising on trades, present two options: Aggressive (maximize upside, accept more risk) and Neutral (balanced, protect floor)",
+  "- Lead with a clear recommendation, then explain reasoning",
+  "- Keep responses focused and direct. No padding.",
+  "- Use the league context provided to calibrate every answer to the specific format, size, and scoring."
+].join("\n");
 
 // ─── API HELPERS ────────────────────────────────────────────
 const sfetch = async (path) => {
@@ -514,9 +516,9 @@ const More = ({st,lg,lgs,onLoad,loadingU,uErr,uname,setUname,uid,apiKey,setApiKe
 // ─── APP ────────────────────────────────────────────────────
 function App() {
   const [tab,setTab] = useState("more");
-  const [uname,setUname] = useState("");
+  const [uname,setUname] = useState(()=>localStorage.getItem("da_username")||"");
   const [uid,setUid] = useState(null);
-  const [apiKey,setApiKey] = useState("");
+  const [apiKey,setApiKey] = useState(()=>localStorage.getItem("da_apikey")||"");
   const [lgs,setLgs] = useState([]);
   const [selLg,setSelLg] = useState(null);
   const [lcache,setLcache] = useState({});
@@ -525,6 +527,10 @@ function App() {
   const [loadLg,setLoadLg] = useState(false);
   const [loadPc,setLoadPc] = useState(false);
   const [uErr,setUErr] = useState(null);
+
+  // Persist username and API key to localStorage
+  useEffect(()=>{ if(uname) localStorage.setItem("da_username", uname); }, [uname]);
+  useEffect(()=>{ if(apiKey) localStorage.setItem("da_apikey", apiKey); }, [apiKey]);
 
   // Fetch players once
   useEffect(()=>{if(pc)return;setLoadPc(true);sfetch("/players/nfl").then(setPc).catch(e=>console.error("Players load failed:",e)).finally(()=>setLoadPc(false));},[]);
@@ -542,6 +548,14 @@ function App() {
     }catch(e){setUErr(e.message);}
     finally{setLoadU(false);}
   },[uname]);
+
+  // Auto-load leagues on startup if username was saved
+  const hasAutoLoaded = useRef(false);
+  useEffect(()=>{
+    if(hasAutoLoaded.current) return;
+    const savedUser = localStorage.getItem("da_username");
+    if(savedUser && !uid) { hasAutoLoaded.current=true; onLoad(); }
+  },[]);
 
   useEffect(()=>{
     if(!selLg||!uid)return;const lid=selLg.league_id;if(lcache[lid])return;
