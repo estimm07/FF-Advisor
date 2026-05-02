@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Dynasty Advisor" />
 <title>Dynasty Advisor</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -16,6 +19,9 @@
   ::-webkit-scrollbar { width: 4px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 4px; }
+  :root { --sat: env(safe-area-inset-top, 0px); --sab: env(safe-area-inset-bottom, 0px); }
+  #app-header { padding-top: max(16px, calc(env(safe-area-inset-top, 0px) + 8px)); }
+  #app-main { padding-top: 0 !important; }
 </style>
 </head>
 <body>
@@ -62,31 +68,17 @@ const SLEEPER = "https://api.sleeper.app/v1";
 const SB_URL = "https://jgwbqzvmjolawzqnvaik.supabase.co";
 const SB_KEY = "sb_publishable_hnpNwjes_53ioJ4fSerz3w_I3d1mQRw";
 const MSG_LIMIT = 50;
-
 let _sb = null;
-const sb = () => {
-  if (!_sb) _sb = supabase.createClient(SB_URL, SB_KEY);
-  return _sb;
-};
-
+const sb = () => { if (!_sb) _sb = supabase.createClient(SB_URL, SB_KEY); return _sb; };
 const loadMessages = async (username, leagueId) => {
   if (!username || !leagueId) return [];
-  const { data, error } = await sb()
-    .from("dynasty_messages")
-    .select("role, content, created_at")
-    .eq("username", username)
-    .eq("league_id", leagueId)
-    .order("created_at", { ascending: true })
-    .limit(MSG_LIMIT);
+  const { data, error } = await sb().from("dynasty_messages").select("role,content,created_at").eq("username",username).eq("league_id",leagueId).order("created_at",{ascending:true}).limit(MSG_LIMIT);
   if (error) { console.error("Load messages error:", error); return []; }
   return data || [];
 };
-
 const saveMessage = async (username, leagueId, role, content) => {
   if (!username || !leagueId) return;
-  const { error } = await sb()
-    .from("dynasty_messages")
-    .insert({ username, league_id: leagueId, role, content });
+  const { error } = await sb().from("dynasty_messages").insert({username, league_id:leagueId, role, content});
   if (error) console.error("Save message error:", error);
 };
 
@@ -162,12 +154,61 @@ const standings = (rosters, users) => {
     .map((s,i) => ({...s, rank: i+1, record: s.wins+"-"+s.losses+(s.ties?"-"+s.ties:"")}));
 };
 
-const leagueCtx = (lg, st, ur, pc) => {
+const leagueCtx = (lg, st, ur, pc, allRosters, leagueUsers, tradedPicks) => {
   if (!lg) return "";
   const {format, scoring} = fmtLeague(lg.scoring_settings, lg.roster_positions);
-  const rp = (ur?.players||[]).map(id => { const p=pInfo(id,pc); return p.name+" ("+p.pos+", "+p.team+", age "+(p.age||"?")+")"; });
-  const t8 = st.slice(0,8).map(s => "#"+s.rank+" "+s.team+": "+s.record+" ("+s.pf+" PF)");
-  return "<league_context>\nLeague: "+lg.name+"\nFormat: "+format+", "+lg.total_rosters+"-team, "+scoring+"\nRoster Slots: "+(lg.roster_positions||[]).join(", ")+"\nSeason: "+SEASON+"\n\nMy Roster:\n"+rp.join("\n")+"\n\nStandings (top 8):\n"+t8.join("\n")+"\n</league_context>";
+
+  // Starter slots breakdown
+  const slotCounts = {};
+  (lg.roster_positions||[]).forEach(s => { slotCounts[s] = (slotCounts[s]||0)+1; });
+  const slotStr = Object.entries(slotCounts).map(([k,v])=>v+"x "+k).join(", ");
+
+  // Full scoring settings (key ones)
+  const sc = lg.scoring_settings || {};
+  const scoringDetail = [
+    "rec: "+(sc.rec||0),
+    sc.bonus_rec_te ? "TE bonus: "+sc.bonus_rec_te : null,
+    sc.bonus_rec_wr ? "WR bonus: "+sc.bonus_rec_wr : null,
+    sc.bonus_rec_rb ? "RB bonus: "+sc.bonus_rec_rb : null,
+    "pass_td: "+(sc.pass_td||0),
+    "rush_td: "+(sc.rush_td||0),
+    "rec_td: "+(sc.rec_td||0),
+    sc.pass_2pt ? "2pt_conv: "+sc.pass_2pt : null,
+  ].filter(Boolean).join(", ");
+
+  // My roster
+  const myRoster = (ur?.players||[]).map(id => { const p=pInfo(id,pc); return p.name+" ("+p.pos+", "+p.team+", age "+(p.age||"?")+")"; });
+
+  // All teams' rosters
+  const allTeams = (allRosters||[]).map(r => {
+    const name = leagueUsers ? (leagueUsers.find(u=>u.user_id===r.owner_id)?.metadata?.team_name || leagueUsers.find(u=>u.user_id===r.owner_id)?.display_name || "Unknown") : "Unknown";
+    const isMe = r.owner_id === ur?.owner_id;
+    const players = (r.players||[]).map(id => { const p=pInfo(id,pc); return p.name+" ("+p.pos+", age "+(p.age||"?")+")"; });
+    return (isMe?"[MY TEAM] ":"")+name+":\n  "+players.join(", ");
+  });
+
+  // Traded picks
+  const picksStr = (tradedPicks||[]).length > 0
+    ? (tradedPicks||[]).map(pk => {
+        const prevOwner = leagueUsers?.find(u=>u.user_id===pk.previous_owner_id)?.display_name || pk.previous_owner_id;
+        const curOwner = leagueUsers?.find(u=>u.user_id===pk.owner_id)?.display_name || pk.owner_id;
+        return pk.season+" "+pk.round+(pk.round===1?"st":pk.round===2?"nd":pk.round===3?"rd":"th")+" ("+prevOwner+" → "+curOwner+")";
+      }).join("\n  ")
+    : "None recorded";
+
+  // Full standings
+  const standingsStr = st.map(s => "#"+s.rank+" "+s.team+": "+s.record+" ("+s.pf+" PF)").join("\n");
+
+  return "<league_context>\n" +
+    "League: "+lg.name+"\n" +
+    "Format: "+format+", "+lg.total_rosters+"-team, "+scoring+"\n" +
+    "Starter Slots: "+slotStr+"\n" +
+    "Scoring Detail: "+scoringDetail+"\n" +
+    "Season: "+SEASON+"\n\n" +
+    "Full Standings:\n"+standingsStr+"\n\n" +
+    "All Team Rosters:\n"+allTeams.join("\n\n")+"\n\n" +
+    "Traded Draft Picks:\n  "+picksStr+"\n" +
+    "</league_context>";
 };
 
 // ─── SVG ICONS ──────────────────────────────────────────────
@@ -224,7 +265,7 @@ const Picker = ({items,sel,onTog,onClose,title,renderItem}) => (
 // ─── BOTTOM NAV ─────────────────────────────────────────────
 const TABS = [{id:"home",label:"Home",d:I.home},{id:"roster",label:"Roster",d:I.roster},{id:"matchup",label:"Matchup",d:I.matchup},{id:"trades",label:"Trades",d:I.trades},{id:"more",label:"More",d:I.more}];
 
-const Nav = ({act,go}) => <nav style={{position:"fixed",bottom:0,left:0,right:0,background:"rgba(6,7,10,0.92)",backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",borderTop:"1px solid "+C.border,display:"flex",justifyContent:"space-around",alignItems:"center",paddingBottom:"calc(env(safe-area-inset-bottom, 0px) + 8px)",paddingTop:12,zIndex:100}}>
+const Nav = ({act,go}) => <nav style={{position:"fixed",bottom:0,left:0,right:0,background:"rgba(6,7,10,0.92)",backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",borderTop:"1px solid "+C.border,display:"flex",justifyContent:"space-around",alignItems:"center",paddingTop:10,paddingBottom:"calc(env(safe-area-inset-bottom, 0px) + 10px)",zIndex:100}}>
   {TABS.map(t => {const a=act===t.id; return <button key={t.id} onClick={()=>go(t.id)} style={{background:"none",border:"none",display:"flex",flexDirection:"column",alignItems:"center",gap:4,padding:"8px 16px",cursor:"pointer",color:a?C.accent:C.textMute,transition:"color 0.2s",minWidth:48,minHeight:44}}><Ico d={t.d} size={22} color={a?C.accent:C.textMute} sw={a?2:1.5}/><span style={{fontFamily:MONO,fontSize:9,fontWeight:a?700:500,letterSpacing:0.8,textTransform:"uppercase"}}>{t.label}</span></button>;})}
 </nav>;
 
@@ -247,33 +288,30 @@ const LgSel = ({lgs,sel,pick}) => {
 };
 
 // ─── HOME ───────────────────────────────────────────────────
-const Home = ({lg,st,ur,pc,apiKey,username}) => {
+const Home = ({lg,st,ur,pc,apiKey,username,allRosters,leagueUsers,tradedPicks}) => {
   const [inp,setInp] = useState("");
   const [msgs,setMsgs] = useState([]);
   const [busy,setBusy] = useState(false);
   const [histLoading,setHistLoading] = useState(false);
   const endRef = useRef(null);
 
-  useEffect(() => {
-    if (!lg || !username) return;
+  useEffect(()=>{
+    if(!lg||!username)return;
     setHistLoading(true);
-    loadMessages(username, lg.league_id).then(history => {
-      if (history.length > 0) {
-        setMsgs(history);
-      } else {
-        setMsgs([{role:"assistant", content:"Welcome to the Dynasty Advisor. I've loaded your **"+lg.name+"** league — "+lg.total_rosters+"-team "+lg._fmt+" "+lg._scr+". What do you want to work on?"}]);
-      }
+    loadMessages(username, lg.league_id).then(history=>{
+      if(history.length>0){setMsgs(history);}
+      else{setMsgs([{role:"assistant",content:"Welcome to the Dynasty Advisor. I've loaded your **"+lg.name+"** league — "+lg.total_rosters+"-team "+lg._fmt+" "+lg._scr+". What do you want to work on?"}]);}
       setHistLoading(false);
     });
-  }, [lg?.league_id, username]);
-  useEffect(() => { endRef.current?.scrollIntoView({behavior:"smooth"}); }, [msgs]);
+  },[lg?.league_id,username]);
+  useEffect(()=>{ endRef.current?.scrollIntoView({behavior:"smooth"}); },[msgs]);
 
   const send = useCallback(async () => {
     if (!inp.trim()||busy) return;
     const q = inp.trim(); setInp(""); setMsgs(m=>[...m,{role:"user",content:q}]); setBusy(true);
     saveMessage(username, lg.league_id, "user", q);
     try {
-      const ctx = leagueCtx(lg,st,ur,pc);
+      const ctx = leagueCtx(lg,st,ur,pc,allRosters,leagueUsers,tradedPicks);
       const hist = msgs.filter(m=>m.role==="user"||m.role==="assistant").map(m=>({role:m.role,content:m.content}));
       hist.push({role:"user",content:ctx+"\n\nUser question: "+q});
       const reply = await callClaude(hist, apiKey);
@@ -281,7 +319,7 @@ const Home = ({lg,st,ur,pc,apiKey,username}) => {
       saveMessage(username, lg.league_id, "assistant", reply);
     } catch(e) { setMsgs(m=>[...m,{role:"assistant",content:"Error: "+e.message}]); }
     finally { setBusy(false); }
-  }, [inp,busy,lg,st,ur,pc,msgs,apiKey,username]);
+  }, [inp,busy,lg,st,ur,pc,msgs,apiKey,username,allRosters,leagueUsers,tradedPicks]);
 
   const me = st.find(s=>s.ownerId===ur?.owner_id);
   if (!lg) return <Empty title="No league selected" desc="Go to Settings to connect"/>;
@@ -393,7 +431,7 @@ const Matchup = ({lg,ur,rosters,lusers,pc}) => {
 };
 
 // ─── TRADES ─────────────────────────────────────────────────
-const Trades = ({lg,rosters,lusers,ur,pc,st,apiKey}) => {
+const Trades = ({lg,rosters,lusers,ur,pc,st,apiKey,tradedPicks}) => {
   const [sec,setSec] = useState("builder");
   const [txs,setTxs] = useState([]); const [txL,setTxL] = useState(false);
   const [myP,setMyP] = useState([]); const [oppT,setOppT] = useState(null); const [oppP,setOppP] = useState([]);
@@ -420,7 +458,7 @@ const Trades = ({lg,rosters,lusers,ur,pc,st,apiKey}) => {
   const analyze = useCallback(async()=>{
     if(!myP.length||!oppP.length)return; setAna(true);setRes(null);
     try{
-      const ctx=leagueCtx(lg,st,ur,pc);
+      const ctx=leagueCtx(lg,st,ur,pc,rosters,lusers,tradedPicks);
       const ms=myP.map(p=>p.name+" ("+p.pos+", "+p.team+")").join(", ");
       const ts=oppP.map(p=>p.name+" ("+p.pos+", "+p.team+")").join(", ");
       const prompt=ctx+"\n\nAnalyze this trade:\nI send: "+ms+"\nI receive: "+ts+"\n\nGive two options: Aggressive and Neutral. For each, state who wins and why. Factor dynasty value, age, positional scarcity for this league format, and my roster construction.";
@@ -565,6 +603,15 @@ function App() {
   const [uname,setUname] = useState(()=>localStorage.getItem("da_username")||"");
   const [uid,setUid] = useState(null);
   const [apiKey,setApiKey] = useState(()=>localStorage.getItem("da_apikey")||"");
+  const [headerH,setHeaderH] = useState(80);
+  const headerRef = useRef(null);
+
+  useEffect(()=>{
+    const measure = () => { if(headerRef.current) setHeaderH(headerRef.current.offsetHeight); };
+    measure();
+    window.addEventListener('resize', measure);
+    return ()=>window.removeEventListener('resize', measure);
+  },[]);
   const [lgs,setLgs] = useState([]);
   const [selLg,setSelLg] = useState(null);
   const [lcache,setLcache] = useState({});
@@ -593,30 +640,31 @@ function App() {
 
   const hasAutoLoaded = useRef(false);
   useEffect(()=>{
-    if(hasAutoLoaded.current) return;
-    const savedUser = localStorage.getItem("da_username");
-    if(savedUser && !uid) { hasAutoLoaded.current=true; onLoad(); }
+    if(hasAutoLoaded.current)return;
+    const su=localStorage.getItem("da_username");
+    if(su&&!uid){hasAutoLoaded.current=true;onLoad();}
   },[]);
 
   useEffect(()=>{
     if(!selLg||!uid)return;const lid=selLg.league_id;if(lcache[lid])return;
     setLoadLg(true);
-    Promise.all([sfetch("/league/"+lid+"/rosters"),sfetch("/league/"+lid+"/users")])
-      .then(([r,u])=>setLcache(p=>({...p,[lid]:{rosters:r,users:u}})))
+    Promise.all([sfetch("/league/"+lid+"/rosters"),sfetch("/league/"+lid+"/users"),sfetch("/league/"+lid+"/traded_picks")])
+      .then(([r,u,tp])=>setLcache(p=>({...p,[lid]:{rosters:r,users:u,tradedPicks:tp||[]}})))
       .catch(console.error).finally(()=>setLoadLg(false));
   },[selLg?.league_id,uid]);
 
   const ld=lcache[selLg?.league_id];
   const rosters=ld?.rosters||[];
   const lusers=ld?.users||[];
+  const tradedPicks=ld?.tradedPicks||[];
   const ur=rosters.find(r=>r.owner_id===uid)||null;
   const st=useMemo(()=>standings(rosters,lusers),[rosters,lusers]);
   const busy=loadPc||loadLg;
 
-  return <div style={{width:"100%",height:"100vh",background:C.bg,color:C.text,fontFamily:FONT,display:"flex",flexDirection:"column",overflow:"hidden",position:"relative"}}>
+  return <div style={{width:"100%",height:"100vh",background:C.bg,color:C.text,fontFamily:FONT,overflow:"hidden",position:"relative"}}>
     <div style={{position:"fixed",inset:0,opacity:0.015,pointerEvents:"none",zIndex:0,backgroundImage:'url("data:image/svg+xml,%3Csvg viewBox=\'0 0 256 256\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'n\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'0.9\' numOctaves=\'4\' stitchTiles=\'stitch\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23n)\'/%3E%3C/svg%3E")'}}/>
 
-    <header style={{padding:"calc(env(safe-area-inset-top, 0px) + 16px) 20px 12px",borderBottom:"1px solid "+C.border,position:"relative",zIndex:10,flexShrink:0}}>
+    <header id="app-header" ref={headerRef} style={{padding:"16px 20px 12px",paddingTop:"max(16px, calc(env(safe-area-inset-top, 0px) + 8px))",borderBottom:"1px solid "+C.border,position:"fixed",top:0,left:0,right:0,zIndex:10,background:C.bg}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:lgs.length?12:0}}>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
           <div style={{width:32,height:32,borderRadius:8,background:"linear-gradient(135deg,"+C.accent+",#059669)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:MONO,fontSize:14,fontWeight:800,color:C.bg}}>DA</div>
@@ -630,7 +678,7 @@ function App() {
       {lgs.length>0&&<LgSel lgs={lgs} sel={selLg} pick={setSelLg}/>}
     </header>
 
-    <main style={{flex:1,overflowY:"auto",padding:"16px 20px",paddingBottom:"calc(env(safe-area-inset-bottom, 0px) + 88px)",position:"relative",zIndex:1,display:"flex",flexDirection:"column"}}>
+    <main id="app-main" style={{position:"fixed",top:headerH,left:0,right:0,bottom:0,overflowY:"auto",padding:"16px 20px",paddingBottom:"calc(env(safe-area-inset-bottom, 0px) + 88px)",zIndex:1,display:"flex",flexDirection:"column"}}>
       {!uid&&tab!=="more"?
         <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flex:1,gap:16,textAlign:"center"}}>
           <div style={{width:56,height:56,borderRadius:14,background:C.accentDim,display:"flex",alignItems:"center",justifyContent:"center"}}><Ico d={I.gear} size={28} color={C.accent}/></div>
@@ -638,10 +686,10 @@ function App() {
           <button onClick={()=>setTab("more")} style={{background:C.accentDim,border:"1px solid "+C.accentBorder,borderRadius:10,padding:"12px 24px",cursor:"pointer",fontFamily:FONT,fontSize:14,fontWeight:600,color:C.accent}}>Go to Settings</button>
         </div>
       :<>
-        {tab==="home"&&<Home lg={selLg} st={st} ur={ur} pc={pc} apiKey={apiKey} username={uname}/>}
+        {tab==="home"&&<Home lg={selLg} st={st} ur={ur} pc={pc} apiKey={apiKey} username={uname} allRosters={rosters} leagueUsers={lusers} tradedPicks={tradedPicks}/>}
         {tab==="roster"&&<Roster ur={ur} pc={pc}/>}
         {tab==="matchup"&&<Matchup lg={selLg} ur={ur} rosters={rosters} lusers={lusers} pc={pc}/>}
-        {tab==="trades"&&<Trades lg={selLg} rosters={rosters} lusers={lusers} ur={ur} pc={pc} st={st} apiKey={apiKey}/>}
+        {tab==="trades"&&<Trades lg={selLg} rosters={rosters} lusers={lusers} ur={ur} pc={pc} st={st} apiKey={apiKey} tradedPicks={tradedPicks}/>}
         {tab==="more"&&<More st={st} lg={selLg} lgs={lgs} onLoad={onLoad} loadingU={loadU} uErr={uErr} uname={uname} setUname={setUname} uid={uid} apiKey={apiKey} setApiKey={setApiKey}/>}
       </>}
     </main>
