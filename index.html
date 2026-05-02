@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
 <title>Dynasty Advisor</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -23,6 +23,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script type="text/babel">
 const { useState, useMemo, useCallback, useRef, useEffect } = React;
 
@@ -58,6 +59,36 @@ const FONT = "'Outfit', sans-serif";
 const MONO = "'JetBrains Mono', monospace";
 const SEASON = "2025";
 const SLEEPER = "https://api.sleeper.app/v1";
+const SB_URL = "https://jgwbqzvmjolawzqnvaik.supabase.co";
+const SB_KEY = "sb_publishable_hnpNwjes_53ioJ4fSerz3w_I3d1mQRw";
+const MSG_LIMIT = 50;
+
+let _sb = null;
+const sb = () => {
+  if (!_sb) _sb = supabase.createClient(SB_URL, SB_KEY);
+  return _sb;
+};
+
+const loadMessages = async (username, leagueId) => {
+  if (!username || !leagueId) return [];
+  const { data, error } = await sb()
+    .from("dynasty_messages")
+    .select("role, content, created_at")
+    .eq("username", username)
+    .eq("league_id", leagueId)
+    .order("created_at", { ascending: true })
+    .limit(MSG_LIMIT);
+  if (error) { console.error("Load messages error:", error); return []; }
+  return data || [];
+};
+
+const saveMessage = async (username, leagueId, role, content) => {
+  if (!username || !leagueId) return;
+  const { error } = await sb()
+    .from("dynasty_messages")
+    .insert({ username, league_id: leagueId, role, content });
+  if (error) console.error("Save message error:", error);
+};
 
 const SYSTEM_PROMPT = [
   "You are an expert dynasty fantasy football advisor. You combine deep NFL player valuation knowledge, roster construction strategy, and long-term dynasty team building expertise.",
@@ -92,7 +123,7 @@ const callClaude = async (messages, apiKey) => {
       "anthropic-version": "2023-06-01",
       "anthropic-dangerous-direct-browser-access": "true",
     },
-    body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1500, system: SYSTEM_PROMPT, messages }),
+    body: JSON.stringify({ model: "claude-sonnet-4-5", max_tokens: 1500, system: SYSTEM_PROMPT, messages }),
   });
   if (!r.ok) {
     const e = await r.json().catch(() => ({}));
@@ -193,7 +224,7 @@ const Picker = ({items,sel,onTog,onClose,title,renderItem}) => (
 // ─── BOTTOM NAV ─────────────────────────────────────────────
 const TABS = [{id:"home",label:"Home",d:I.home},{id:"roster",label:"Roster",d:I.roster},{id:"matchup",label:"Matchup",d:I.matchup},{id:"trades",label:"Trades",d:I.trades},{id:"more",label:"More",d:I.more}];
 
-const Nav = ({act,go}) => <nav style={{position:"fixed",bottom:0,left:0,right:0,height:72,background:"rgba(6,7,10,0.92)",backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",borderTop:"1px solid "+C.border,display:"flex",justifyContent:"space-around",alignItems:"center",paddingBottom:8,zIndex:100}}>
+const Nav = ({act,go}) => <nav style={{position:"fixed",bottom:0,left:0,right:0,background:"rgba(6,7,10,0.92)",backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",borderTop:"1px solid "+C.border,display:"flex",justifyContent:"space-around",alignItems:"center",paddingBottom:"calc(env(safe-area-inset-bottom, 0px) + 8px)",paddingTop:12,zIndex:100}}>
   {TABS.map(t => {const a=act===t.id; return <button key={t.id} onClick={()=>go(t.id)} style={{background:"none",border:"none",display:"flex",flexDirection:"column",alignItems:"center",gap:4,padding:"8px 16px",cursor:"pointer",color:a?C.accent:C.textMute,transition:"color 0.2s",minWidth:48,minHeight:44}}><Ico d={t.d} size={22} color={a?C.accent:C.textMute} sw={a?2:1.5}/><span style={{fontFamily:MONO,fontSize:9,fontWeight:a?700:500,letterSpacing:0.8,textTransform:"uppercase"}}>{t.label}</span></button>;})}
 </nav>;
 
@@ -216,27 +247,41 @@ const LgSel = ({lgs,sel,pick}) => {
 };
 
 // ─── HOME ───────────────────────────────────────────────────
-const Home = ({lg,st,ur,pc,apiKey}) => {
+const Home = ({lg,st,ur,pc,apiKey,username}) => {
   const [inp,setInp] = useState("");
   const [msgs,setMsgs] = useState([]);
   const [busy,setBusy] = useState(false);
+  const [histLoading,setHistLoading] = useState(false);
   const endRef = useRef(null);
 
-  useEffect(() => { if(lg) setMsgs([{role:"assistant",content:"Welcome to the Dynasty Advisor. I've loaded your **"+lg.name+"** league — "+lg.total_rosters+"-team "+lg._fmt+" "+lg._scr+". What do you want to work on?"}]); }, [lg?.league_id]);
+  useEffect(() => {
+    if (!lg || !username) return;
+    setHistLoading(true);
+    loadMessages(username, lg.league_id).then(history => {
+      if (history.length > 0) {
+        setMsgs(history);
+      } else {
+        setMsgs([{role:"assistant", content:"Welcome to the Dynasty Advisor. I've loaded your **"+lg.name+"** league — "+lg.total_rosters+"-team "+lg._fmt+" "+lg._scr+". What do you want to work on?"}]);
+      }
+      setHistLoading(false);
+    });
+  }, [lg?.league_id, username]);
   useEffect(() => { endRef.current?.scrollIntoView({behavior:"smooth"}); }, [msgs]);
 
   const send = useCallback(async () => {
     if (!inp.trim()||busy) return;
     const q = inp.trim(); setInp(""); setMsgs(m=>[...m,{role:"user",content:q}]); setBusy(true);
+    saveMessage(username, lg.league_id, "user", q);
     try {
       const ctx = leagueCtx(lg,st,ur,pc);
       const hist = msgs.filter(m=>m.role==="user"||m.role==="assistant").map(m=>({role:m.role,content:m.content}));
       hist.push({role:"user",content:ctx+"\n\nUser question: "+q});
       const reply = await callClaude(hist, apiKey);
       setMsgs(m=>[...m,{role:"assistant",content:reply}]);
+      saveMessage(username, lg.league_id, "assistant", reply);
     } catch(e) { setMsgs(m=>[...m,{role:"assistant",content:"Error: "+e.message}]); }
     finally { setBusy(false); }
-  }, [inp,busy,lg,st,ur,pc,msgs,apiKey]);
+  }, [inp,busy,lg,st,ur,pc,msgs,apiKey,username]);
 
   const me = st.find(s=>s.ownerId===ur?.owner_id);
   if (!lg) return <Empty title="No league selected" desc="Go to Settings to connect"/>;
@@ -250,6 +295,7 @@ const Home = ({lg,st,ur,pc,apiKey}) => {
         </div>)}
     </div>}
     <div style={{flex:1,overflowY:"auto",display:"flex",flexDirection:"column",gap:12,paddingBottom:8,minHeight:0}}>
+      {histLoading&&<div style={{display:"flex",justifyContent:"center",padding:20}}><Spin size={16}/></div>}
       {msgs.map((m,i)=><div key={i} style={{alignSelf:m.role==="user"?"flex-end":"flex-start",maxWidth:"88%",background:m.role==="user"?C.accentDim:C.card,border:"1px solid "+(m.role==="user"?C.accentBorder:C.border),borderRadius:m.role==="user"?"16px 16px 4px 16px":"16px 16px 16px 4px",padding:"12px 16px"}}>
         {m.role==="assistant"&&<div style={{fontFamily:MONO,fontSize:9,color:C.accent,textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>Advisor</div>}
         <div style={{fontFamily:FONT,fontSize:13.5,color:C.text,lineHeight:1.55,whiteSpace:"pre-wrap"}}>{m.content}</div>
@@ -528,10 +574,6 @@ function App() {
   const [loadPc,setLoadPc] = useState(false);
   const [uErr,setUErr] = useState(null);
 
-  // Persist username and API key to localStorage
-  useEffect(()=>{ if(uname) localStorage.setItem("da_username", uname); }, [uname]);
-  useEffect(()=>{ if(apiKey) localStorage.setItem("da_apikey", apiKey); }, [apiKey]);
-
   // Fetch players once
   useEffect(()=>{if(pc)return;setLoadPc(true);sfetch("/players/nfl").then(setPc).catch(e=>console.error("Players load failed:",e)).finally(()=>setLoadPc(false));},[]);
 
@@ -549,7 +591,6 @@ function App() {
     finally{setLoadU(false);}
   },[uname]);
 
-  // Auto-load leagues on startup if username was saved
   const hasAutoLoaded = useRef(false);
   useEffect(()=>{
     if(hasAutoLoaded.current) return;
@@ -575,7 +616,7 @@ function App() {
   return <div style={{width:"100%",height:"100vh",background:C.bg,color:C.text,fontFamily:FONT,display:"flex",flexDirection:"column",overflow:"hidden",position:"relative"}}>
     <div style={{position:"fixed",inset:0,opacity:0.015,pointerEvents:"none",zIndex:0,backgroundImage:'url("data:image/svg+xml,%3Csvg viewBox=\'0 0 256 256\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'n\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'0.9\' numOctaves=\'4\' stitchTiles=\'stitch\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23n)\'/%3E%3C/svg%3E")'}}/>
 
-    <header style={{padding:"16px 20px 12px",borderBottom:"1px solid "+C.border,position:"relative",zIndex:10,flexShrink:0}}>
+    <header style={{padding:"calc(env(safe-area-inset-top, 0px) + 16px) 20px 12px",borderBottom:"1px solid "+C.border,position:"relative",zIndex:10,flexShrink:0}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:lgs.length?12:0}}>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
           <div style={{width:32,height:32,borderRadius:8,background:"linear-gradient(135deg,"+C.accent+",#059669)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:MONO,fontSize:14,fontWeight:800,color:C.bg}}>DA</div>
@@ -589,7 +630,7 @@ function App() {
       {lgs.length>0&&<LgSel lgs={lgs} sel={selLg} pick={setSelLg}/>}
     </header>
 
-    <main style={{flex:1,overflowY:"auto",padding:"16px 20px",paddingBottom:88,position:"relative",zIndex:1,display:"flex",flexDirection:"column"}}>
+    <main style={{flex:1,overflowY:"auto",padding:"16px 20px",paddingBottom:"calc(env(safe-area-inset-bottom, 0px) + 88px)",position:"relative",zIndex:1,display:"flex",flexDirection:"column"}}>
       {!uid&&tab!=="more"?
         <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flex:1,gap:16,textAlign:"center"}}>
           <div style={{width:56,height:56,borderRadius:14,background:C.accentDim,display:"flex",alignItems:"center",justifyContent:"center"}}><Ico d={I.gear} size={28} color={C.accent}/></div>
@@ -597,7 +638,7 @@ function App() {
           <button onClick={()=>setTab("more")} style={{background:C.accentDim,border:"1px solid "+C.accentBorder,borderRadius:10,padding:"12px 24px",cursor:"pointer",fontFamily:FONT,fontSize:14,fontWeight:600,color:C.accent}}>Go to Settings</button>
         </div>
       :<>
-        {tab==="home"&&<Home lg={selLg} st={st} ur={ur} pc={pc} apiKey={apiKey}/>}
+        {tab==="home"&&<Home lg={selLg} st={st} ur={ur} pc={pc} apiKey={apiKey} username={uname}/>}
         {tab==="roster"&&<Roster ur={ur} pc={pc}/>}
         {tab==="matchup"&&<Matchup lg={selLg} ur={ur} rosters={rosters} lusers={lusers} pc={pc}/>}
         {tab==="trades"&&<Trades lg={selLg} rosters={rosters} lusers={lusers} ur={ur} pc={pc} st={st} apiKey={apiKey}/>}
